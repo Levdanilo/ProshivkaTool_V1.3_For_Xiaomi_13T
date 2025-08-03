@@ -1,0 +1,493 @@
+import os
+import subprocess
+import webbrowser
+import time
+import pygame
+import threading
+from enum import Enum
+import sys
+from datetime import datetime
+
+class MenuAction(Enum):
+    RUN_BAT = 1
+    SHOW_LINK = 2
+    OPEN_URL = 3
+    RUN_EXE = 4
+    NOT_WORKING = 5
+    MUSIC_PLAYER = 6
+
+class MenuItem:
+    def __init__(self, name, action=None, action_data=None, submenu=None, path_segment=None):
+        self.name = name
+        self.action = action
+        self.action_data = action_data
+        self.submenu = submenu
+        self.path_segment = path_segment or name
+
+class MusicPlayer:
+    def __init__(self, music_path):
+        self.music_path = music_path
+        self.playlist = []
+        self.current_track = 0
+        self.playing = False
+        self.paused = False
+        self.start_time = 0
+        self.current_position = 0
+        self.duration = 0
+        self.load_playlist()
+        
+        # Инициализация pygame mixer
+        pygame.mixer.init()
+        pygame.mixer.music.set_endevent(pygame.USEREVENT)
+        
+    def load_playlist(self):
+        """Загрузка плейлиста из папки с музыкой"""
+        if not os.path.exists(self.music_path):
+            os.makedirs(self.music_path)
+            print(f"Создана папка для музыки: {self.music_path}")
+            return
+            
+        supported_formats = ('.mp3', '.wav', '.ogg', '.flac')
+        for file in os.listdir(self.music_path):
+            if file.lower().endswith(supported_formats):
+                self.playlist.append(os.path.join(self.music_path, file))
+        
+        if self.playlist:
+            print(f"Загружено треков: {len(self.playlist)}")
+    
+    def play(self, track_index=None):
+        """Воспроизведение трека"""
+        if not self.playlist:
+            return False
+            
+        if track_index is not None:
+            self.current_track = track_index
+            
+        try:
+            pygame.mixer.music.load(self.playlist[self.current_track])
+            pygame.mixer.music.play()
+            self.playing = True
+            self.paused = False
+            self.start_time = time.time()
+            
+            # Получение длительности трека
+            sound = pygame.mixer.Sound(self.playlist[self.current_track])
+            self.duration = sound.get_length()
+            return True
+        except Exception as e:
+            print(f"Ошибка воспроизведения: {e}")
+            return False
+    
+    def stop(self):
+        """Остановка воспроизведения"""
+        pygame.mixer.music.stop()
+        self.playing = False
+        self.paused = False
+        self.current_position = 0
+    
+    def pause(self):
+        """Пауза"""
+        if self.playing and not self.paused:
+            pygame.mixer.music.pause()
+            self.paused = True
+            self.current_position = time.time() - self.start_time
+    
+    def unpause(self):
+        """Продолжить воспроизведение"""
+        if self.playing and self.paused:
+            pygame.mixer.music.unpause()
+            self.paused = False
+            self.start_time = time.time() - self.current_position
+    
+    def next_track(self):
+        """Следующий трек"""
+        if not self.playlist:
+            return False
+            
+        self.current_track = (self.current_track + 1) % len(self.playlist)
+        return self.play()
+    
+    def prev_track(self):
+        """Предыдущий трек"""
+        if not self.playlist:
+            return False
+            
+        self.current_track = (self.current_track - 1) % len(self.playlist)
+        return self.play()
+    
+    def get_current_time(self):
+        """Текущая позиция воспроизведения"""
+        if not self.playing:
+            return 0
+            
+        if self.paused:
+            return self.current_position
+            
+        return time.time() - self.start_time
+    
+    def get_progress(self):
+        """Прогресс воспроизведения в процентах"""
+        if self.duration <= 0:
+            return 0
+        return min(100, max(0, int((self.get_current_time() / self.duration) * 100)))
+    
+    def format_time(self, seconds):
+        """Форматирование времени в MM:SS"""
+        minutes = int(seconds // 60)
+        seconds = int(seconds % 60)
+        return f"{minutes:02d}:{seconds:02d}"
+    
+    def get_current_status(self):
+        """Статус воспроизведения"""
+        if not self.playlist:
+            return "Нет треков в плейлисте", "", "", 0
+            
+        filename = os.path.basename(self.playlist[self.current_track])
+        current_time = self.format_time(self.get_current_time())
+        total_time = self.format_time(self.duration)
+        progress = self.get_progress()
+        
+        status = "▶ Воспроизведение" if self.playing and not self.paused else "⏸ Пауза"
+        return f"{status}: {filename}", current_time, total_time, progress
+
+class FlashTool:
+    def __init__(self):
+        self.base_path = r"C:\ProshivkaTool"
+        self.music_path = os.path.join(self.base_path, "Music")
+        self.current_path = self.base_path
+        self.menu_stack = []
+        self.music_player = MusicPlayer(self.music_path)
+        self.music_thread = None
+        self.music_active = False
+        self.setup_menu()
+        
+        # Проверяем, поддерживает ли терминал Unicode
+        self.supports_unicode = sys.stdout.encoding.lower().startswith('utf')
+        
+    def print_ascii_art(self):
+        """Выводит ASCII-арт с проверкой поддержки Unicode"""
+        if self.supports_unicode:
+            art = r"""
+
+██████╗░██████╗░░█████╗░░██████╗██╗░░██╗██╗██╗░░░██╗██╗░░██╗
+██╔══██╗██╔══██╗██╔══██╗██╔════╝██║░░██║██║██║░░░██║██║░██╔╝
+██████╔╝██████╔╝██║░░██║╚█████╗░███████║██║╚██╗░██╔╝█████═╝░
+██╔═══╝░██╔══██╗██║░░██║░╚═══██╗██╔══██║██║░╚████╔╝░██╔═██╗░
+██║░░░░░██║░░██║╚█████╔╝██████╔╝██║░░██║██║░░╚██╔╝░░██║░╚██╗
+╚═╝░░░░░╚═╝░░╚═╝░╚════╝░╚═════╝░╚═╝░░╚═╝╚═╝░░░╚═╝░░░╚═╝░░╚═╝
+░█████╗░████████╗░█████╗░░█████╗░██╗░░░░░
+██╔══██╗╚══██╔══╝██╔══██╗██╔══██╗██║░░░░░
+███████║░░░██║░░░██║░░██║██║░░██║██║░░░░░
+██╔══██║░░░██║░░░██║░░██║██║░░██║██║░░░░░
+██║░░██║░░░██║░░░╚█████╔╝╚█████╔╝███████╗
+╚═╝░░╚═╝░░░╚═╝░░░░╚════╝░░╚════╝░╚══════╝
+
+██╗░░░██╗░░░░░███╗░░░░░██████╗░
+██║░░░██║░░░░████║░░░░░╚════██╗
+╚██╗░██╔╝░░░██╔██║░░░░░░░███╔═╝
+░╚████╔╝░░░░╚═╝██║░░░░░██╔══╝░░
+░░╚██╔╝░░░██╗███████╗██╗███████╗
+░░░╚═╝░░░░╚═╝╚══════╝╚═╝╚══════╝
+
+███████╗░█████╗░██████╗░
+██╔════╝██╔══██╗██╔══██╗
+█████╗░░██║░░██║██████╔╝
+██╔══╝░░██║░░██║██╔══██╗
+██║░░░░░╚█████╔╝██║░░██║
+╚═╝░░░░░░╚════╝░╚═╝░░╚═╝
+
+██╗░░██╗██╗░█████╗░░█████╗░███╗░░░███╗██╗
+╚██╗██╔╝██║██╔══██╗██╔══██╗████╗░████║██║
+░╚███╔╝░██║███████║██║░░██║██╔████╔██║██║
+░██╔██╗░██║██╔══██║██║░░██║██║╚██╔╝██║██║
+██╔╝╚██╗██║██║░░██║╚█████╔╝██║░╚═╝░██║██║
+╚═╝░░╚═╝╚═╝╚═╝░░╚═╝░╚════╝░╚═╝░░░░░╚═╝╚═╝
+
+░░███╗░░██████╗░████████╗
+░████║░░╚════██╗╚══██╔══╝
+██╔██║░░░█████╔╝░░░██║░░░
+╚═╝██║░░░╚═══██╗░░░██║░░░
+███████╗██████╔╝░░░██║░░░
+╚══════╝╚═════╝░░░░╚═╝░░░
+"""
+            print(art)
+        else:
+            # Альтернативный ASCII-арт для терминалов без Unicode
+            print("""
+
+╭━━━┳━━━┳━━━┳━━━┳╮╱╭┳━━┳╮╱╱╭┳╮╭━┳━━━┳━━━━┳━━━┳━━━┳╮
+┃╭━╮┃╭━╮┃╭━╮┃╭━╮┃┃╱┃┣┫┣┫╰╮╭╯┃┃┃╭┫╭━╮┃╭╮╭╮┃╭━╮┃╭━╮┃┃
+┃╰━╯┃╰━╯┃┃╱┃┃╰━━┫╰━╯┃┃┃╰╮┃┃╭┫╰╯╯┃┃╱┃┣╯┃┃╰┫┃╱┃┃┃╱┃┃┃
+┃╭━━┫╭╮╭┫┃╱┃┣━━╮┃╭━╮┃┃┃╱┃╰╯┃┃╭╮┃┃╰━╯┃╱┃┃╱┃┃╱┃┃┃╱┃┃┃╱╭╮
+┃┃╱╱┃┃┃╰┫╰━╯┃╰━╯┃┃╱┃┣┫┣╮╰╮╭╯┃┃┃╰┫╭━╮┃╱┃┃╱┃╰━╯┃╰━╯┃╰━╯┃
+╰╯╱╱╰╯╰━┻━━━┻━━━┻╯╱╰┻━━╯╱╰╯╱╰╯╰━┻╯╱╰╯╱╰╯╱╰━━━┻━━━┻━━━╯
+╭╮╱╱╭╮╭╮╱╭━━━╮
+┃╰╮╭╯┣╯┃╱┃╭━╮┃
+╰╮┃┃╭┻╮┃╱╰╯╭╯┃
+╱┃╰╯┃╱┃┃╱╭━╯╭╯
+╱╰╮╭╯╭╯╰┳┫┃╰━╮
+╱╱╰╯╱╰━━┻┻━━━╯
+╭━━━┳━━━┳━━━╮
+┃╭━━┫╭━╮┃╭━╮┃
+┃╰━━┫┃╱┃┃╰━╯┃
+┃╭━━┫┃╱┃┃╭╮╭╯
+┃┃╱╱┃╰━╯┃┃┃╰╮
+╰╯╱╱╰━━━┻╯╰━╯
+╭━╮╭━┳━━┳━━━┳━━━┳━╮╭━┳━━╮
+╰╮╰╯╭┻┫┣┫╭━╮┃╭━╮┃┃╰╯┃┣┫┣╯
+╱╰╮╭╯╱┃┃┃┃╱┃┃┃╱┃┃╭╮╭╮┃┃┃
+╱╭╯╰╮╱┃┃┃╰━╯┃┃╱┃┃┃┃┃┃┃┃┃
+╭╯╭╮╰┳┫┣┫╭━╮┃╰━╯┃┃┃┃┃┣┫┣╮
+╰━╯╰━┻━━┻╯╱╰┻━━━┻╯╰╯╰┻━━╯
+╱╭╮╭━━━┳━━━━╮
+╭╯┃┃╭━╮┃╭╮╭╮┃
+╰╮┃╰╯╭╯┣╯┃┃╰╯
+╱┃┃╭╮╰╮┃╱┃┃
+╭╯╰┫╰━╯┃╱┃┃
+╰━━┻━━━╯╱╰╯
+                         
+            """)
+    
+    def start_music_player(self):
+        """Запуск музыкального проигрывателя в отдельном потоке"""
+        if self.music_active:
+            return
+            
+        self.music_active = True
+        self.music_thread = threading.Thread(target=self.run_music_player, daemon=True)
+        self.music_thread.start()
+    
+    def stop_music_player(self):
+        """Остановка музыкального проигрывателя"""
+        if self.music_active:
+            self.music_active = False
+            self.music_player.stop()
+    
+    def run_music_player(self):
+        """Основной цикл музыкального проигрывателя"""
+        # Автовоспроизведение первого трека
+        if not self.music_player.playing and self.music_player.playlist:
+            self.music_player.play()
+        
+        last_update = 0
+        while self.music_active:
+            current_time = time.time()
+            # Обновляем интерфейс каждые 0.5 секунд
+            if current_time - last_update > 0.5:
+                last_update = current_time
+                # Автопереход к следующему треку
+                if self.music_player.playing and not self.music_player.paused:
+                    if self.music_player.get_current_time() >= self.music_player.duration:
+                        self.music_player.next_track()
+            time.sleep(0.1)
+    
+    def show_music_menu(self):
+        """Отображение меню управления музыкой"""
+        while True:
+            os.system('cls' if os.name == 'nt' else 'clear')
+            self.print_ascii_art()
+            print("\n" + "="*50)
+            print(" МУЗЫКАЛЬНЫЙ ПРОИГРЫВАТЕЛЬ")
+            print("="*50)
+            
+            # Отображение статуса воспроизведения
+            status, current_time, total_time, progress = self.music_player.get_current_status()
+            print(f"\n{status}")
+            if self.music_player.playlist:
+                print(f"Время: {current_time} / {total_time}")
+                # Прогресс-бар
+                bar_length = 50
+                filled = int(progress * bar_length / 100)
+                progress_bar = '[' + '=' * filled + ' ' * (bar_length - filled) + ']'
+                print(f"Прогресс: {progress_bar} {progress}%\n")
+            
+            print("Управление:")
+            print("1. Воспроизвести/Пауза")
+            print("2. Следующий трек")
+            print("3. Предыдущий трек")
+            print("4. Остановить")
+            print("5. Вернуться в главное меню")
+            
+            # Список треков
+            if self.music_player.playlist:
+                print("\nТреки в плейлисте:")
+                for i, track in enumerate(self.music_player.playlist):
+                    filename = os.path.basename(track)
+                    prefix = "→ " if i == self.music_player.current_track else "  "
+                    print(f"{prefix}{i+1}. {filename}")
+            else:
+                print("\nВ папке Music нет поддерживаемых аудиофайлов")
+                print("Добавьте файлы в форматах: MP3, WAV, OGG, FLAC")
+            
+            choice = input("\nВаш выбор: ").strip()
+            
+            if choice == "1":
+                if self.music_player.playing and not self.music_player.paused:
+                    self.music_player.pause()
+                elif self.music_player.playing and self.music_player.paused:
+                    self.music_player.unpause()
+                else:
+                    self.music_player.play()
+            elif choice == "2":
+                self.music_player.next_track()
+            elif choice == "3":
+                self.music_player.prev_track()
+            elif choice == "4":
+                self.music_player.stop()
+            elif choice == "5":
+                return
+            elif choice.isdigit():
+                track_num = int(choice) - 1
+                if 0 <= track_num < len(self.music_player.playlist):
+                    self.music_player.play(track_num)
+    
+    def setup_menu(self):
+        # Ссылки для раздела 6 (официальные прошивки)
+        hyperos1_links = {
+            "1.0.2.0.UMFMIXM": "https://example.com/HyperOS1.0.2",
+            "1.0.3.0.UMFMIXM": "https://example.com/HyperOS1.0.3",
+            "1.0.4.0.UMFMIXM": "https://example.com/HyperOS1.0.4",
+            "1.0.5.0.UMFMIXM": "https://example.com/HyperOS1.0.5",
+            "1.0.6.0.UMFMIXM": "https://example.com/HyperOS1.0.6",
+            "1.0.9.0.UMFMIXM": "https://example.com/HyperOS1.0.9",
+            "1.0.10.0.UMFMIXM": "https://example.com/HyperOS1.0.10"
+        }
+        
+        hyperos2_links = {
+            "2.0.2.0.VMFMIXM": "https://example.com/HyperOS2.0.2",
+            "2.0.3.0.VMFMIXM": "https://example.com/HyperOS2.0.3",
+            "2.0.103.0.VMFMIXM": "https://example.com/HyperOS2.0.103",
+            "2.0.104.0.VMFMIXM": "https://example.com/HyperOS2.0.104"
+        }
+        
+        miui14_links = {
+            "14.0.5.0.TMFMIXM": "https://example.com/MIUI14.0.5",
+            "14.0.6.0.TMFMIXM": "https://example.com/MIUI14.0.6"
+        }
+        
+        # Раздел 1: Прошивка boot
+        boot_menu = {
+            "1": MenuItem("HyperOS 1", submenu={
+                "1": MenuItem("1.0.3.0.UMFMIXM", path_segment="HyperOS 1.0.3.0.UMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "2": MenuItem("1.0.4.0.UMFMIXM", path_segment="HyperOS 1.0.4.0.UMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "3": MenuItem("1.0.5.0.UMFMIXM", path_segment="HyperOS 1.0.5.0.UMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "4": MenuItem("1.0.6.0.UMFMIXM", path_segment="HyperOS 1.0.6.0.UMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "5": MenuItem("1.0.9.0.UMFMIXM", path_segment="HyperOS 1.0.9.0.UMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "6": MenuItem("1.0.10.0.UMFMIXM", path_segment="HyperOS 1.0.10.0.UMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                })
+            }, path_segment="HyperOS 1"),
+            "2": MenuItem("HyperOS 2", submenu={
+                "1": MenuItem("2.0.2.0.VMFMIXM", path_segment="HyperOS 2.0.2.0.VMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "2": MenuItem("2.0.3.0.VMFMIXM", path_segment="HyperOS 2.0.3.0.VMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "3": MenuItem("2.0.103.0.VMFMIXM", path_segment="HyperOS 2.0.103.0.VMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "4": MenuItem("2.0.104.0.VMFMIXM", path_segment="HyperOS 2.0.104.0.VMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                })
+            }, path_segment="HyperOS 2"),
+            "3": MenuItem("MIUI 14", submenu={
+                "1": MenuItem("14.0.5.0.TMFMIXM", path_segment="MIUI 14.0.5.0.TMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                }),
+                "2": MenuItem("14.0.6.0.TMFMIXM", path_segment="MIUI 14.0.6.0.TMFMIXM", submenu={
+                    "1": MenuItem("Оригинал", action=MenuAction.RUN_BAT, action_data="Оригинал.bat"),
+                    "2": MenuItem("Magisk", action=MenuAction.RUN_BAT, action_data="Magisk.bat")
+                })
+            }, path_segment="MIUI 14")
+        }
+        
+        # Раздел 2: Загрузка прошивки на основе официальной
+        firmware_menu = {
+            "1": MenuItem("HyperOS 2.0.103.0 EEA", 
+                         action=MenuAction.RUN_BAT, 
+                         action_data="HyperOS 2.0.103.0 EEA.bat",
+                         path_segment="Загрузка прошивки на основе официальной")
+        }
+        
+        # Раздел 3: Кастомное recovery
+        recovery_menu = {
+            "1": MenuItem("OrangeFox Recovery", 
+                         action=MenuAction.RUN_BAT, 
+                         action_data="OrangeFox.bat",
+                         path_segment="Кастом Recovery")
+        }
+        
+        # Раздел 6: Загрузка официальных прошивок
+        official_download_menu = {
+            "1": MenuItem("HyperOS 1", submenu={
+                str(i+1): MenuItem(version, action=MenuAction.OPEN_URL, action_data=url)
+                for i, (version, url) in enumerate(hyperos1_links.items())
+            }),
+            "2": MenuItem("HyperOS 2", submenu={
+                str(i+1): MenuItem(version, action=MenuAction.OPEN_URL, action_data=url)
+                for i, (version, url) in enumerate(hyperos2_links.items())
+            }),
+            "3": MenuItem("MIUI 14", submenu={
+                str(i+1): MenuItem(version, action=MenuAction.OPEN_URL, action_data=url)
+                for i, (version, url) in enumerate(miui14_links.items())
+            })
+        }
+        
+        # Раздел 7: Прошивка Fastboot
+        fastboot_menu = {
+            "1": MenuItem("Прошить через Fastboot", 
+                         action=MenuAction.RUN_EXE, 
+                         action_data="FastbootTool.exe",
+                         path_segment="Прошивка официальных прошивок для Fastboot mode")
+        }
+        
+        # Раздел 8: Разблокировка загрузчика
+        unlock_menu = {
+            "1": MenuItem("Mi Unlock", 
+                         action=MenuAction.RUN_EXE, 
+                         action_data="miflash_unlock.exe",
+                         path_segment="Разблокировка загрузчика"),
+            "2": MenuItem("Driver x86", 
+                         action=MenuAction.RUN_EXE, 
+                         action_data="driver_install.exe",
+                         path_segment="Разблокировка загрузчика"),
+            "3": MenuItem("Driver x64", 
+                         action=MenuAction.RUN_EXE, 
+                         action_data="driver_install_64.exe",
+                         path_segment="Разблокировка загрузчика")
+        }
+        
+        # Главное меню
+        self.main_menu = {
+            "1": MenuItem("Прошивка оригинального boot и с вшитым magisk", 
+                         submenu=boot_menu,
+                         path_segment="Прошивка оригинального boot и с вшитым magisk"),
+            "2": MenuItem("Загрузка прошивки на основе официальной", 
+                         submenu=firmware_menu,
+                         path_segment="Загрузка прошивки на основе официальной"),
+            "3": MenuItem("Кастомное recovery", 
+                         submenu=recovery_menu,
+                         path_segment="Кастом Recovery"),
+            "4": MenuItem(
