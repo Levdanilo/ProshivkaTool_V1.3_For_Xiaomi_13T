@@ -1,0 +1,37 @@
+modules = ["python-3.11"]
+
+[nix]
+channel = "stable-25_05"
+packages = ["SDL2", "SDL2_image", "SDL2_mixer", "SDL2_ttf", "fontconfig", "freetype", "lcms2", "libimagequant", "libjpeg", "libpng", "libtiff", "libwebp", "libxcrypt", "openjpeg", "pkg-config", "portmidi", "tcl", "tk", "zlib"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "ProshivkaTool GUI"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "test_gui_app"
+
+[[workflows.workflow]]
+name = "ProshivkaTool GUI"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install pygame pillow && python ProshivkaTool.py"
+
+[[workflows.workflow]]
+name = "test_gui_app"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pip install pygame pillow && python ProshivkaTool.py"
