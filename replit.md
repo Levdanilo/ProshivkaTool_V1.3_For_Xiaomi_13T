@@ -2,11 +2,21 @@
 
 ## Overview
 
-ProshivkaTool is a Python-based desktop application that serves as a comprehensive tool launcher and music player. The application provides a graphical user interface built with tkinter that allows users to execute various system operations including running batch files, opening URLs, launching executables, and playing music files. The tool features a hierarchical menu system for organizing different functionalities and includes an integrated music player with playlist support.
+ProshivkaTool is a comprehensive Python GUI application designed for Xiaomi 13T firmware flashing operations with an integrated music player. The application features a modern graphical interface built with tkinter, beautiful gradient backgrounds, hierarchical menu navigation for firmware operations, and a fully functional music player that supports multiple audio formats. The tool is specifically designed for managing firmware flashing, bootloader unlocking, recovery installation, and custom ROM operations.
+
+## Recent Changes (January 2025)
+
+- ✅ **Complete GUI Implementation**: Created modern tkinter-based interface with gradient background
+- ✅ **Background Image Integration**: Added support for custom background images with fallback gradient generation
+- ✅ **Music Player Integration**: Full-featured music player with playlist management, volume control, and playback controls
+- ✅ **Error Handling**: Comprehensive audio device error handling for environments without sound
+- ✅ **Menu System**: Hierarchical navigation system for firmware operations and tools
+- ✅ **Cross-Platform Compatibility**: Designed to work in various environments including Replit
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+Language: Russian for UI and communication.
 
 ## System Architecture
 

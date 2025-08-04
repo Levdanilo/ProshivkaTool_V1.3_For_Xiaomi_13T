@@ -1,0 +1,18 @@
+Sample Music Files for ProshivkaTool
+===================================
+
+This folder should contain your music files for the integrated player.
+
+To use the music player:
+1. Add your music files (.mp3, .wav, .ogg, .flac) to this folder
+2. Click "Refresh Playlist" in the music player interface
+3. Use the control buttons to play, pause, skip tracks
+4. Adjust volume with the slider
+
+Example files you can add:
+- background_music.mp3
+- notification_sound.wav
+- ambient_sound.ogg
+- custom_ringtone.flac
+
+Note: Audio playback requires proper audio drivers and may not work in all environments (like Replit's web interface).
