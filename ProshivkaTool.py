@@ -57,7 +57,7 @@ class MusicPlayer:
                 pygame.mixer.music.set_volume(self.volume)
                 self.audio_available = True
                 print("Audio initialized successfully")
-            except pygame.error as e:
+            except Exception as e:
                 print(f"Audio not available: {e}")
                 self.audio_available = False
         else:
@@ -231,33 +231,46 @@ class FlashToolGUI:
     def setup_styles(self):
         """Setup custom styles for ttk widgets"""
         style = ttk.Style()
-        style.theme_use('clam')
         
-        # Configure styles for modern look
-        style.configure('Title.TLabel', 
-                       font=('Arial', 16, 'bold'), 
-                       foreground='white',
-                       background='#1a1a2e')
+        # Use a more compatible theme
+        try:
+            style.theme_use('clam')
+        except:
+            try:
+                style.theme_use('alt')
+            except:
+                style.theme_use('default')
         
-        style.configure('Subtitle.TLabel', 
-                       font=('Arial', 12), 
-                       foreground='#e0e0e0',
-                       background='#1a1a2e')
+        # Configure styles for modern look with error handling
+        try:
+            style.configure('Title.TLabel', 
+                           font=('Arial', 16, 'bold'), 
+                           foreground='white',
+                           background='#1a1a2e')
+        except:
+            pass
         
-        style.configure('Menu.TButton',
-                       font=('Arial', 10),
-                       padding=(10, 5))
+        try:
+            style.configure('Subtitle.TLabel', 
+                           font=('Arial', 12), 
+                           foreground='#e0e0e0',
+                           background='#1a1a2e')
+        except:
+            pass
         
-        style.configure('Music.TButton',
-                       font=('Arial', 9),
-                       padding=(5, 3))
+        try:
+            style.configure('Menu.TButton',
+                           font=('Arial', 10),
+                           padding=(10, 5))
+        except:
+            pass
         
-        style.configure('Progress.TProgressbar',
-                       background='#4facfe',
-                       troughcolor='#2e2e3e',
-                       borderwidth=0,
-                       lightcolor='#4facfe',
-                       darkcolor='#4facfe')
+        try:
+            style.configure('Music.TButton',
+                           font=('Arial', 9),
+                           padding=(5, 3))
+        except:
+            pass
     
     def load_background_image(self):
         """Load and resize the background image"""
@@ -283,18 +296,19 @@ class FlashToolGUI:
         img = Image.new('RGB', (width, height))
         pixels = img.load()
         
-        for y in range(height):
-            for x in range(width):
-                # Calculate gradient position (0.0 to 1.0)
-                pos_x = x / width
-                pos_y = y / height
-                
-                # Blue to cyan to pink gradient
-                r = int(79 + (255 - 79) * (pos_x * 0.5 + pos_y * 0.5))
-                g = int(172 + (105 - 172) * pos_y)
-                b = int(254 - (254 - 180) * pos_x)
-                
-                pixels[x, y] = (r, g, b)
+        if pixels is not None:
+            for y in range(height):
+                for x in range(width):
+                    # Calculate gradient position (0.0 to 1.0)
+                    pos_x = x / width
+                    pos_y = y / height
+                    
+                    # Blue to cyan to pink gradient
+                    r = int(79 + (255 - 79) * (pos_x * 0.5 + pos_y * 0.5))
+                    g = int(172 + (105 - 172) * pos_y)
+                    b = int(254 - (254 - 180) * pos_x)
+                    
+                    pixels[x, y] = (r, g, b)
         
         return ImageTk.PhotoImage(img)
     
@@ -406,8 +420,7 @@ class FlashToolGUI:
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(self.progress_frame,
                                           variable=self.progress_var,
-                                          maximum=100,
-                                          style='Progress.TProgressbar')
+                                          maximum=100)
         self.progress_bar.pack(fill=tk.X, pady=5)
         
         # Control buttons frame
