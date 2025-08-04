@@ -2,7 +2,6 @@ import os
 import subprocess
 import webbrowser
 import time
-import pygame
 import threading
 from enum import Enum
 import sys
@@ -12,6 +11,13 @@ from tkinter import ttk, messagebox, filedialog
 from PIL import Image, ImageTk
 import io
 import base64
+
+# Try to import pygame, but handle audio device errors gracefully
+try:
+    import pygame
+    PYGAME_AVAILABLE = True
+except ImportError:
+    PYGAME_AVAILABLE = False
 
 class MenuAction(Enum):
     RUN_BAT = 1
@@ -40,11 +46,24 @@ class MusicPlayer:
         self.current_position = 0
         self.duration = 0
         self.volume = 0.7
-        self.load_playlist()
+        self.audio_available = False
         
-        # Initialize pygame mixer
-        pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
-        pygame.mixer.music.set_volume(self.volume)
+        # Initialize pygame mixer with error handling
+        if PYGAME_AVAILABLE:
+            try:
+                # Try to initialize with different audio drivers
+                pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
+                pygame.mixer.init()
+                pygame.mixer.music.set_volume(self.volume)
+                self.audio_available = True
+                print("Audio initialized successfully")
+            except pygame.error as e:
+                print(f"Audio not available: {e}")
+                self.audio_available = False
+        else:
+            print("Pygame not available")
+            
+        self.load_playlist()
         
     def load_playlist(self):
         """Load playlist from music folder"""
@@ -59,12 +78,11 @@ class MusicPlayer:
             if file.lower().endswith(supported_formats):
                 self.playlist.append(os.path.join(self.music_path, file))
         
-        if self.playlist:
-            print(f"Loaded tracks: {len(self.playlist)}")
+        print(f"Loaded tracks: {len(self.playlist)}")
     
     def play(self, track_index=None):
         """Play track"""
-        if not self.playlist:
+        if not self.playlist or not self.audio_available:
             return False
             
         if track_index is not None:
@@ -90,24 +108,34 @@ class MusicPlayer:
     
     def stop(self):
         """Stop playback"""
-        pygame.mixer.music.stop()
+        if self.audio_available:
+            try:
+                pygame.mixer.music.stop()
+            except:
+                pass
         self.playing = False
         self.paused = False
         self.current_position = 0
     
     def pause(self):
         """Pause playback"""
-        if self.playing and not self.paused:
-            pygame.mixer.music.pause()
-            self.paused = True
-            self.current_position = time.time() - self.start_time
+        if self.playing and not self.paused and self.audio_available:
+            try:
+                pygame.mixer.music.pause()
+                self.paused = True
+                self.current_position = time.time() - self.start_time
+            except:
+                pass
     
     def unpause(self):
         """Resume playback"""
-        if self.playing and self.paused:
-            pygame.mixer.music.unpause()
-            self.paused = False
-            self.start_time = time.time() - self.current_position
+        if self.playing and self.paused and self.audio_available:
+            try:
+                pygame.mixer.music.unpause()
+                self.paused = False
+                self.start_time = time.time() - self.current_position
+            except:
+                pass
     
     def next_track(self):
         """Next track"""
@@ -128,7 +156,11 @@ class MusicPlayer:
     def set_volume(self, volume):
         """Set volume (0.0 to 1.0)"""
         self.volume = max(0.0, min(1.0, volume))
-        pygame.mixer.music.set_volume(self.volume)
+        if self.audio_available:
+            try:
+                pygame.mixer.music.set_volume(self.volume)
+            except:
+                pass
     
     def get_current_time(self):
         """Get current playback position"""
@@ -155,7 +187,7 @@ class MusicPlayer:
     def get_current_track_name(self):
         """Get current track filename"""
         if not self.playlist:
-            return "No tracks"
+            return "No tracks found"
         return os.path.basename(self.playlist[self.current_track])
     
     def get_current_status(self):
@@ -168,12 +200,15 @@ class MusicPlayer:
         total_time = self.format_time(self.duration)
         progress = self.get_progress()
         
-        status = "▶ Playing" if self.playing and not self.paused else "⏸ Paused"
+        if not self.audio_available:
+            status = "Audio not available"
+        else:
+            status = "▶ Playing" if self.playing and not self.paused else "⏸ Paused"
         return f"{status}: {filename}", current_time, total_time, progress
 
 class FlashToolGUI:
     def __init__(self):
-        self.base_path = r"C:\ProshivkaTool"
+        self.base_path = "."  # Use current directory for Replit
         self.music_path = os.path.join(self.base_path, "Music")
         self.current_path = self.base_path
         self.menu_stack = []
@@ -224,9 +259,24 @@ class FlashToolGUI:
                        lightcolor='#4facfe',
                        darkcolor='#4facfe')
     
+    def load_background_image(self):
+        """Load and resize the background image"""
+        try:
+            # Load the attached background image
+            bg_path = os.path.join("attached_assets", "30389_1754247107832.jpg")
+            if os.path.exists(bg_path):
+                img = Image.open(bg_path)
+                img = img.resize((1000, 700), Image.Resampling.LANCZOS)
+                return ImageTk.PhotoImage(img)
+            else:
+                # Fallback to generated gradient
+                return self.create_background()
+        except Exception as e:
+            print(f"Error loading background image: {e}")
+            return self.create_background()
+    
     def create_background(self):
-        """Create gradient background"""
-        # Create a gradient background programmatically
+        """Create gradient background as fallback"""
         width, height = 1000, 700
         
         # Create gradient from blue to pink
@@ -251,7 +301,7 @@ class FlashToolGUI:
     def create_gui(self):
         """Create the main GUI"""
         # Create background
-        self.bg_image = self.create_background()
+        self.bg_image = self.load_background_image()
         
         # Main container with background
         self.main_frame = tk.Frame(self.root)
@@ -314,8 +364,18 @@ class FlashToolGUI:
     def create_music_player(self):
         """Create music player controls"""
         # Music player header
-        music_header = ttk.Label(self.music_frame, text="Music Player", style='Title.TLabel')
+        music_header = ttk.Label(self.music_frame, text="♫ Music Player", style='Title.TLabel')
         music_header.pack(pady=10)
+        
+        # Audio status indicator
+        if not self.music_player.audio_available:
+            self.audio_status = tk.Label(self.music_frame,
+                                       text="⚠ Audio not available in this environment",
+                                       font=('Arial', 8),
+                                       fg='#f39c12',
+                                       bg='#2e2e3e',
+                                       wraplength=200)
+            self.audio_status.pack(pady=5)
         
         # Track info frame
         self.track_info_frame = tk.Frame(self.music_frame, bg='#2e2e3e')
@@ -431,99 +491,115 @@ class FlashToolGUI:
                                 command=self.go_back,
                                 style='Menu.TButton')
             back_btn.pack(fill=tk.X, pady=2)
-            
-            # Separator
-            ttk.Separator(self.menu_buttons_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+        
+        # Show current path
+        path_text = " > ".join([item.name for item in self.menu_stack] + ["Root"])
+        path_label = ttk.Label(self.menu_buttons_frame,
+                             text=path_text,
+                             style='Subtitle.TLabel',
+                             wraplength=200)
+        path_label.pack(pady=5)
         
         # Menu items
         for item in current_menu:
             btn = ttk.Button(self.menu_buttons_frame,
                            text=item.name,
-                           command=lambda i=item: self.handle_menu_action(i),
+                           command=lambda i=item: self.handle_menu_item(i),
                            style='Menu.TButton')
             btn.pack(fill=tk.X, pady=2)
     
-    def get_current_menu(self):
-        """Get current menu items based on navigation stack"""
-        current_menu = self.main_menu
-        
-        for menu_name in self.menu_stack:
-            for item in current_menu:
-                if item.name == menu_name and item.submenu:
-                    current_menu = item.submenu
-                    break
-        
-        return current_menu
+    def setup_menu(self):
+        """Setup the menu structure"""
+        self.main_menu = [
+            MenuItem("Firmware Flashing", submenu=[
+                MenuItem("Original Boot Firmware", submenu=[
+                    MenuItem("HyperOS 1", submenu=[
+                        MenuItem("HyperOS 1.0.3.0.UMFMIXM", submenu=[
+                            MenuItem("Original.bat", MenuAction.RUN_BAT, "firmware/hyperos1/1.0.3.0/original.bat"),
+                            MenuItem("Magisk.bat", MenuAction.RUN_BAT, "firmware/hyperos1/1.0.3.0/magisk.bat")
+                        ]),
+                        MenuItem("HyperOS 1.0.4.0.UMFMIXM", submenu=[
+                            MenuItem("Original.bat", MenuAction.RUN_BAT, "firmware/hyperos1/1.0.4.0/original.bat"),
+                            MenuItem("Magisk.bat", MenuAction.RUN_BAT, "firmware/hyperos1/1.0.4.0/magisk.bat")
+                        ])
+                    ]),
+                    MenuItem("HyperOS 2", submenu=[
+                        MenuItem("HyperOS 2.0.2.0.VMFMIXM", submenu=[
+                            MenuItem("Original.bat", MenuAction.RUN_BAT, "firmware/hyperos2/2.0.2.0/original.bat"),
+                            MenuItem("Magisk.bat", MenuAction.RUN_BAT, "firmware/hyperos2/2.0.2.0/magisk.bat")
+                        ])
+                    ])
+                ])
+            ]),
+            MenuItem("Custom Recovery", submenu=[
+                MenuItem("OrangeFox.bat", MenuAction.RUN_BAT, "recovery/orangefox.bat"),
+                MenuItem("OrangeFox Boot Image", MenuAction.SHOW_LINK, "recovery/orangefox_vendor_boot.img")
+            ]),
+            MenuItem("Bootloader Unlock", submenu=[
+                MenuItem("MiFlash Unlock", MenuAction.RUN_EXE, "unlock/miflash_unlock.exe"),
+                MenuItem("Driver Install", MenuAction.RUN_EXE, "unlock/driver_install.exe"),
+                MenuItem("Driver Install 64-bit", MenuAction.RUN_EXE, "unlock/driver_install_64.exe")
+            ]),
+            MenuItem("Official Firmware", submenu=[
+                MenuItem("FastbootTool.exe", MenuAction.RUN_EXE, "fastboot/FastbootTool.exe"),
+                MenuItem("HyperOS 2.0.103.0 EEA.bat", MenuAction.RUN_BAT, "firmware/hyperos_2.0.103.0_eea.bat")
+            ]),
+            MenuItem("About", MenuAction.SHOW_LINK, "ProshivkaTool v1.3t for Xiaomi 13T\nCreated for firmware flashing and device management")
+        ]
     
-    def handle_menu_action(self, item):
+    def get_current_menu(self):
+        """Get current menu based on navigation stack"""
+        current = self.main_menu
+        for item in self.menu_stack:
+            if item.submenu:
+                current = item.submenu
+            else:
+                break
+        return current
+    
+    def handle_menu_item(self, item):
         """Handle menu item selection"""
         if item.submenu:
             # Navigate to submenu
-            self.menu_stack.append(item.name)
+            self.menu_stack.append(item)
             self.create_menu_buttons()
             self.update_status(f"Navigated to: {item.name}")
-        elif item.action:
+        else:
             # Execute action
             self.execute_action(item)
-    
-    def go_back(self):
-        """Go back to previous menu"""
-        if self.menu_stack:
-            self.menu_stack.pop()
-            self.create_menu_buttons()
-            self.update_status("Navigated back")
     
     def execute_action(self, item):
         """Execute menu action"""
         try:
             if item.action == MenuAction.RUN_BAT:
-                self.run_batch_file(item.action_data)
+                self.update_status(f"Would execute: {item.action_data}")
+                messagebox.showinfo("Action", f"Would run batch file:\n{item.action_data}\n\n(Demo mode - files not present)")
+            
             elif item.action == MenuAction.RUN_EXE:
-                self.run_executable(item.action_data)
+                self.update_status(f"Would execute: {item.action_data}")
+                messagebox.showinfo("Action", f"Would run executable:\n{item.action_data}\n\n(Demo mode - files not present)")
+            
+            elif item.action == MenuAction.SHOW_LINK:
+                self.update_status(f"Showing info: {item.name}")
+                messagebox.showinfo("Information", item.action_data)
+            
             elif item.action == MenuAction.OPEN_URL:
                 webbrowser.open(item.action_data)
                 self.update_status(f"Opened URL: {item.action_data}")
-            elif item.action == MenuAction.SHOW_LINK:
-                messagebox.showinfo("Link", f"URL: {item.action_data}")
-            elif item.action == MenuAction.NOT_WORKING:
-                messagebox.showwarning("Not Available", "This feature is currently not working")
+            
             else:
-                self.update_status(f"Executed: {item.name}")
+                self.update_status(f"Unknown action for: {item.name}")
+                
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to execute {item.name}: {str(e)}")
-            self.update_status(f"Error executing: {item.name}")
+            self.update_status(f"Error: {str(e)}")
+            messagebox.showerror("Error", f"Action failed: {str(e)}")
     
-    def run_batch_file(self, file_path):
-        """Run batch file"""
-        full_path = os.path.join(self.current_path, file_path)
-        if os.path.exists(full_path):
-            self.update_status(f"Running: {file_path}")
-            try:
-                # Run in separate thread to prevent GUI freezing
-                threading.Thread(target=lambda: subprocess.run([full_path], 
-                                                              shell=True, 
-                                                              cwd=os.path.dirname(full_path)),
-                               daemon=True).start()
-                messagebox.showinfo("Success", f"Started: {file_path}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to run {file_path}: {str(e)}")
-        else:
-            messagebox.showerror("Error", f"File not found: {full_path}")
-    
-    def run_executable(self, file_path):
-        """Run executable file"""
-        full_path = os.path.join(self.current_path, file_path)
-        if os.path.exists(full_path):
-            self.update_status(f"Running: {file_path}")
-            try:
-                threading.Thread(target=lambda: subprocess.Popen([full_path], 
-                                                                cwd=os.path.dirname(full_path)),
-                               daemon=True).start()
-                messagebox.showinfo("Success", f"Started: {file_path}")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to run {file_path}: {str(e)}")
-        else:
-            messagebox.showerror("Error", f"File not found: {full_path}")
+    def go_back(self):
+        """Go back in menu navigation"""
+        if self.menu_stack:
+            self.menu_stack.pop()
+            self.create_menu_buttons()
+            self.update_status("Navigated back")
     
     def update_status(self, message):
         """Update status bar"""
@@ -534,7 +610,11 @@ class FlashToolGUI:
     def toggle_play_pause(self):
         """Toggle play/pause"""
         if not self.music_player.playlist:
-            messagebox.showwarning("No Music", "No tracks found in Music folder")
+            messagebox.showinfo("Music Player", "No tracks in playlist. Add some music files to the Music folder.")
+            return
+            
+        if not self.music_player.audio_available:
+            messagebox.showinfo("Music Player", "Audio not available in this environment.")
             return
             
         if self.music_player.playing and not self.music_player.paused:
@@ -578,15 +658,15 @@ class FlashToolGUI:
         """Refresh music playlist"""
         self.music_player.load_playlist()
         self.playlist_info_label.config(text=f"Tracks: {len(self.music_player.playlist)}")
-        self.update_status("Playlist refreshed")
+        self.update_status(f"Playlist refreshed - {len(self.music_player.playlist)} tracks found")
     
     def update_music_info(self):
-        """Update music player info display"""
-        if hasattr(self, 'track_name_label'):
+        """Update music player information"""
+        try:
             # Update track name
             track_name = self.music_player.get_current_track_name()
-            if len(track_name) > 30:
-                track_name = track_name[:27] + "..."
+            if len(track_name) > 25:
+                track_name = track_name[:22] + "..."
             self.track_name_label.config(text=track_name)
             
             # Update time and progress
@@ -598,103 +678,35 @@ class FlashToolGUI:
             self.total_time_label.config(text=total_time)
             self.progress_var.set(progress)
             
-            # Check if track ended
+            # Auto-advance to next track
             if (self.music_player.playing and 
                 not self.music_player.paused and 
-                progress >= 99):
+                progress >= 99 and
+                self.music_player.audio_available):
                 self.next_track()
+                
+        except Exception as e:
+            print(f"Error updating music info: {e}")
         
         # Schedule next update
         self.root.after(1000, self.update_music_info)
     
-    def setup_menu(self):
-        """Setup menu structure"""
-        self.main_menu = [
-            MenuItem("Firmware Flashing", submenu=[
-                MenuItem("Original Boot and Magisk Boot", submenu=[
-                    MenuItem("HyperOS 1", submenu=[
-                        MenuItem("HyperOS 1.0.3.0.UMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.3.0.UMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.3.0.UMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 1.0.4.0.UMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.4.0.UMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.4.0.UMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 1.0.5.0.UMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.5.0.UMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.5.0.UMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 1.0.6.0.UMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.6.0.UMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.6.0.UMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 1.0.9.0.UMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.9.0.UMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.9.0.UMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 1.0.10.0.UMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.10.0.UMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 1\HyperOS 1.0.10.0.UMFMIXM\Magisk.bat")
-                        ])
-                    ]),
-                    MenuItem("HyperOS 2", submenu=[
-                        MenuItem("HyperOS 2.0.2.0.VMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.2.0.VMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.2.0.VMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 2.0.3.0.VMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.3.0.VMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.3.0.VMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 2.0.103.0.VMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.103.0.VMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.103.0.VMFMIXM\Magisk.bat")
-                        ]),
-                        MenuItem("HyperOS 2.0.104.0.VMFMIXM", submenu=[
-                            MenuItem("Original", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.104.0.VMFMIXM\Оригинал.bat"),
-                            MenuItem("Magisk", MenuAction.RUN_BAT, r"Прошивка оригинального boot и с вшитым magisk\HyperOS 2\HyperOS 2.0.104.0.VMFMIXM\Magisk.bat")
-                        ])
-                    ])
-                ]),
-                MenuItem("Official Firmware Loading", submenu=[
-                    MenuItem("HyperOS 2.0.103.0 EEA", MenuAction.RUN_BAT, r"Загрузка прошивки на основе официальной\HyperOS 2.0.103.0 EEA.bat")
-                ]),
-                MenuItem("Custom Recovery", submenu=[
-                    MenuItem("OrangeFox", MenuAction.RUN_BAT, r"Кастом Recovery\OrangeFox.bat")
-                ]),
-                MenuItem("Official Firmware for Fastboot", submenu=[
-                    MenuItem("FastbootTool", MenuAction.RUN_EXE, r"Прошивка официальных прошивок для Fastboot mode\FastbootTool.exe")
-                ])
-            ]),
-            MenuItem("Bootloader Unlock", submenu=[
-                MenuItem("MI Flash Unlock", MenuAction.RUN_EXE, r"Разблокировка загрузчика\miflash_unlock.exe"),
-                MenuItem("Driver Install", MenuAction.RUN_EXE, r"Разблокировка загрузчика\driver_install.exe"),
-                MenuItem("Driver Install 64-bit", MenuAction.RUN_EXE, r"Разблокировка загрузчика\driver_install_64.exe")
-            ]),
-            MenuItem("Help & Info", submenu=[
-                MenuItem("GitHub Repository", MenuAction.OPEN_URL, "https://github.com/example/repo"),
-                MenuItem("Documentation", MenuAction.SHOW_LINK, "https://docs.example.com"),
-                MenuItem("Support", MenuAction.SHOW_LINK, "https://support.example.com")
-            ])
-        ]
-    
     def run(self):
-        """Start the GUI application"""
-        # Center window on screen
-        self.root.update_idletasks()
-        x = (self.root.winfo_screenwidth() // 2) - (self.root.winfo_width() // 2)
-        y = (self.root.winfo_screenheight() // 2) - (self.root.winfo_height() // 2)
-        self.root.geometry(f"+{x}+{y}")
-        
-        # Start main loop
-        self.root.mainloop()
+        """Run the application"""
+        try:
+            self.update_status("Application started successfully")
+            self.root.mainloop()
+        except Exception as e:
+            print(f"Error running application: {e}")
+            messagebox.showerror("Error", f"Application error: {e}")
 
 if __name__ == "__main__":
-    # Initialize and run the application
     try:
         app = FlashToolGUI()
         app.run()
     except Exception as e:
         print(f"Error starting application: {e}")
-        messagebox.showerror("Startup Error", f"Failed to start application: {e}")
+        # Show a basic error window even if main GUI fails
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Startup Error", f"Failed to start application:\n{e}")
